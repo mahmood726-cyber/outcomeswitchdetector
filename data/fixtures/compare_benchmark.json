@@ -1,0 +1,66 @@
+[
+  {
+    "nctId": "NCT99000001",
+    "protocolPrimary": ["Overall Survival"],
+    "protocolSecondary": ["Progression-Free Survival"],
+    "resultsPrimary": ["Overall Survival"],
+    "resultsSecondary": ["Progression-Free Survival"],
+    "expectedSwitches": []
+  },
+  {
+    "nctId": "NCT99000002",
+    "protocolPrimary": ["Change in HbA1c from baseline"],
+    "protocolSecondary": ["Fasting plasma glucose"],
+    "resultsPrimary": ["Change in HbA1c from baseline", "Proportion achieving HbA1c < 7%"],
+    "resultsSecondary": ["Fasting plasma glucose"],
+    "expectedSwitches": [
+      {
+        "category": "PRIMARY_ADDED",
+        "endpoint": "Proportion achieving HbA1c < 7%"
+      }
+    ]
+  },
+  {
+    "nctId": "NCT99000003",
+    "protocolPrimary": ["Overall Survival"],
+    "protocolSecondary": ["Progression-Free Survival"],
+    "resultsPrimary": ["Progression-Free Survival"],
+    "resultsSecondary": ["Overall Survival"],
+    "expectedSwitches": [
+      {
+        "category": "PROMOTION",
+        "endpoint": "Progression-Free Survival"
+      },
+      {
+        "category": "DEMOTION",
+        "endpoint": "Overall Survival"
+      }
+    ]
+  },
+  {
+    "nctId": "NCT99000004",
+    "protocolPrimary": ["Overall Survival", "Cardiac mortality"],
+    "protocolSecondary": ["LVEF change"],
+    "resultsPrimary": ["Overall Survival"],
+    "resultsSecondary": ["LVEF change"],
+    "expectedSwitches": [
+      {
+        "category": "PRIMARY_REMOVED",
+        "endpoint": "Cardiac mortality"
+      }
+    ]
+  },
+  {
+    "nctId": "NCT99000005",
+    "protocolPrimary": ["Change in blood pressure at 12 weeks"],
+    "protocolSecondary": ["Adverse events"],
+    "resultsPrimary": ["Change in blood pressure at 24 weeks"],
+    "resultsSecondary": ["Adverse events"],
+    "expectedSwitches": [
+      {
+        "category": "TIMEFRAME_CHANGE",
+        "endpoint": "Change in blood pressure"
+      }
+    ]
+  }
+]

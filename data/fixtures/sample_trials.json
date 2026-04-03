@@ -1,0 +1,175 @@
+[
+  {
+    "protocolSection": {
+      "identificationModule": {
+        "nctId": "NCT00000001"
+      },
+      "statusModule": {
+        "overallStatus": "COMPLETED"
+      },
+      "designModule": {
+        "phases": ["PHASE3"]
+      },
+      "sponsorCollaboratorsModule": {
+        "leadSponsor": {
+          "name": "AcmePharma",
+          "class": "INDUSTRY"
+        }
+      },
+      "conditionsModule": {
+        "conditions": ["Heart Failure"]
+      },
+      "outcomesModule": {
+        "primaryOutcomes": [
+          {
+            "measure": "Change in LVEF from baseline",
+            "timeFrame": "12 months"
+          }
+        ],
+        "secondaryOutcomes": [
+          {
+            "measure": "6-minute walk distance",
+            "timeFrame": "12 months"
+          }
+        ]
+      }
+    },
+    "resultsSection": {
+      "outcomeMeasuresModule": {
+        "outcomeMeasures": [
+          {
+            "type": "PRIMARY",
+            "title": "Change in Left Ventricular Ejection Fraction From Baseline",
+            "timeFrame": "12 months"
+          },
+          {
+            "type": "SECONDARY",
+            "title": "6-Minute Walk Distance",
+            "timeFrame": "12 months"
+          }
+        ]
+      }
+    },
+    "hasResults": true
+  },
+  {
+    "protocolSection": {
+      "identificationModule": {
+        "nctId": "NCT00000002"
+      },
+      "statusModule": {
+        "overallStatus": "COMPLETED"
+      },
+      "designModule": {
+        "phases": ["PHASE3"]
+      },
+      "sponsorCollaboratorsModule": {
+        "leadSponsor": {
+          "name": "BetaCorp",
+          "class": "INDUSTRY"
+        }
+      },
+      "conditionsModule": {
+        "conditions": ["Diabetes Mellitus, Type 2"]
+      },
+      "outcomesModule": {
+        "primaryOutcomes": [
+          {
+            "measure": "Change in HbA1c from baseline",
+            "timeFrame": "24 weeks"
+          }
+        ],
+        "secondaryOutcomes": [
+          {
+            "measure": "Change in fasting plasma glucose",
+            "timeFrame": "24 weeks"
+          }
+        ]
+      }
+    },
+    "resultsSection": {
+      "outcomeMeasuresModule": {
+        "outcomeMeasures": [
+          {
+            "type": "PRIMARY",
+            "title": "Change in HbA1c From Baseline",
+            "timeFrame": "24 weeks"
+          },
+          {
+            "type": "PRIMARY",
+            "title": "Proportion Achieving HbA1c < 7%",
+            "timeFrame": "24 weeks"
+          },
+          {
+            "type": "SECONDARY",
+            "title": "Change in Fasting Plasma Glucose",
+            "timeFrame": "24 weeks"
+          }
+        ]
+      }
+    },
+    "hasResults": true
+  },
+  {
+    "protocolSection": {
+      "identificationModule": {
+        "nctId": "NCT00000003"
+      },
+      "statusModule": {
+        "overallStatus": "COMPLETED"
+      },
+      "designModule": {
+        "phases": ["PHASE2"]
+      },
+      "sponsorCollaboratorsModule": {
+        "leadSponsor": {
+          "name": "GammaMed",
+          "class": "INDUSTRY"
+        }
+      },
+      "conditionsModule": {
+        "conditions": ["Non-Small Cell Lung Cancer"]
+      },
+      "outcomesModule": {
+        "primaryOutcomes": [
+          {
+            "measure": "Overall Survival",
+            "timeFrame": "36 months"
+          }
+        ],
+        "secondaryOutcomes": [
+          {
+            "measure": "Progression-Free Survival",
+            "timeFrame": "24 months"
+          },
+          {
+            "measure": "Objective Response Rate",
+            "timeFrame": "12 months"
+          }
+        ]
+      }
+    },
+    "resultsSection": {
+      "outcomeMeasuresModule": {
+        "outcomeMeasures": [
+          {
+            "type": "PRIMARY",
+            "title": "Progression-Free Survival",
+            "timeFrame": "24 months"
+          },
+          {
+            "type": "SECONDARY",
+            "title": "Overall Survival",
+            "timeFrame": "36 months"
+          },
+          {
+            "type": "SECONDARY",
+            "title": "Objective Response Rate",
+            "timeFrame": "12 months"
+          }
+        ]
+      }
+    },
+    "hasResults": true
+  }
+]
