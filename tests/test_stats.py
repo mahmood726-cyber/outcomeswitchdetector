@@ -1,4 +1,4 @@
-"""15 tests for stats_engine module."""
+"""25 tests for stats_engine module."""
 
 import os
 import sys
@@ -20,6 +20,11 @@ from src.stats_engine import (
     bayesian_hierarchical_model,
     latent_class_analysis,
     enhanced_similarity,
+    meta_analyze_switching,
+    interrupted_time_series,
+    mutual_information,
+    permutation_test,
+    negative_binomial_regression,
 )
 
 
@@ -210,3 +215,130 @@ class TestIntegration:
         assert "p_value" in chi
         bh = benjamini_hochberg([chi["p_value"], 0.5])
         assert len(bh) == 2
+
+
+# ============================================================
+# Layer 3 — Meta-Analysis of Switching Rates (2)
+# ============================================================
+
+
+class TestMetaAnalysis:
+    def test_meta_analysis_pooling(self):
+        """Pooled rate should be between 0 and 1 with valid CI."""
+        data = [
+            {"condition": "HF", "switched": 30, "total": 100},
+            {"condition": "DM", "switched": 20, "total": 80},
+            {"condition": "Onc", "switched": 40, "total": 120},
+        ]
+        result = meta_analyze_switching(data)
+        assert 0 < result["pooled_rate"] < 1
+        assert result["ci_lower"] < result["pooled_rate"] < result["ci_upper"]
+        assert 0 <= result["i_squared"] <= 100
+
+    def test_meta_analysis_heterogeneity(self):
+        """Highly heterogeneous data should yield I-squared > 50."""
+        data = [
+            {"condition": "A", "switched": 5, "total": 100},
+            {"condition": "B", "switched": 80, "total": 100},
+        ]
+        result = meta_analyze_switching(data)
+        assert result["i_squared"] > 50
+
+
+# ============================================================
+# Interrupted Time Series (2)
+# ============================================================
+
+
+class TestITS:
+    def test_its_level_change(self):
+        """Clear level change at intervention should be detected."""
+        year_data = [
+            {"year": y, "rate": 0.3 if y < 2007 else 0.5, "n": 100}
+            for y in range(2000, 2015)
+        ]
+        result = interrupted_time_series(year_data)
+        assert result["level_change"] > 0
+        assert result["p_level"] < 0.05
+
+    def test_its_no_change(self):
+        """Constant rate should yield non-significant level change."""
+        year_data = [
+            {"year": y, "rate": 0.3, "n": 100}
+            for y in range(2000, 2015)
+        ]
+        result = interrupted_time_series(year_data)
+        assert result["p_level"] > 0.1
+
+
+# ============================================================
+# Mutual Information (2)
+# ============================================================
+
+
+class TestMutualInformation:
+    def test_mutual_information_independent(self):
+        """Independent random columns should have NMI close to 0."""
+        import numpy as np
+        np.random.seed(42)
+        matrix = np.random.binomial(1, 0.5, (100, 6))
+        result = mutual_information(matrix)
+        assert all(
+            result["normalized_mi_matrix"][i][j] < 0.2
+            for i in range(6) for j in range(6) if i != j
+        )
+
+    def test_mutual_information_correlated(self):
+        """Perfectly correlated columns should have high NMI."""
+        col = [[1, 1, 0, 0, 0, 0]] * 50 + [[0, 0, 1, 1, 0, 0]] * 50
+        result = mutual_information(col)
+        assert result["normalized_mi_matrix"][0][1] > 0.5
+
+
+# ============================================================
+# Permutation Test (2)
+# ============================================================
+
+
+class TestPermutationTest:
+    def test_permutation_test_significant(self):
+        """Large difference in rates should be significant."""
+        result = permutation_test(80, 100, 20, 100, n_perms=5000, seed=42)
+        assert result["p_value"] < 0.001
+
+    def test_permutation_test_nonsignificant(self):
+        """Similar rates should be non-significant."""
+        result = permutation_test(50, 100, 48, 100, n_perms=5000, seed=42)
+        assert result["p_value"] > 0.1
+
+
+# ============================================================
+# Negative Binomial Regression (2)
+# ============================================================
+
+
+class TestNegativeBinomial:
+    def test_nb_regression_coefficients(self):
+        """Coefficient structure should include IRR for all features."""
+        trials_data = [
+            {"switches": s, "sponsor_industry": 1, "phase_num": 3,
+             "log_enrollment": 6}
+            for s in [0, 1, 2, 3, 2, 1]
+        ] + [
+            {"switches": s, "sponsor_industry": 0, "phase_num": 2,
+             "log_enrollment": 4}
+            for s in [0, 0, 1, 0, 1, 0]
+        ]
+        result = negative_binomial_regression(trials_data)
+        assert len(result["coefficients"]) >= 3
+        assert all("irr" in c for c in result["coefficients"])
+
+    def test_nb_regression_irr_positive(self):
+        """All IRR values should be positive."""
+        trials_data = [
+            {"switches": i % 4, "sponsor_industry": i % 2,
+             "phase_num": 2 + i % 3, "log_enrollment": 5 + i * 0.1}
+            for i in range(20)
+        ]
+        result = negative_binomial_regression(trials_data)
+        assert all(c["irr"] > 0 for c in result["coefficients"])

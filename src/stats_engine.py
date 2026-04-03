@@ -4,6 +4,9 @@ Layer 1 (Publication-Essential): Wilson CI, chi-squared, Fisher exact,
     Cochran-Armitage trend, risk-adjusted rates, Benjamini-Hochberg FDR.
 Layer 2 (Methodologically Novel): Bayesian hierarchical model,
     latent class analysis, enhanced TF-IDF similarity.
+Layer 3 (Advanced): Meta-analysis of switching rates, interrupted time
+    series, mutual information, permutation test, negative binomial
+    regression.
 """
 
 import math
@@ -745,3 +748,492 @@ def enhanced_similarity(text_a, text_b):
         if mag_a == 0 or mag_b == 0:
             return 0.0
         return dot / (mag_a * mag_b)
+
+
+# ============================================================
+# Layer 3 — Advanced Statistical Methods (5 methods)
+# ============================================================
+
+
+def meta_analyze_switching(condition_data, method='DL'):
+    """Meta-analysis of switching rates using DerSimonian-Laird random effects.
+
+    Uses Freeman-Tukey double arcsine transformation for proportions.
+
+    Parameters
+    ----------
+    condition_data : list of dict
+        Each dict has {condition, switched, total}.
+    method : str
+        Pooling method (default 'DL' for DerSimonian-Laird).
+
+    Returns
+    -------
+    dict : {pooled_rate, ci_lower, ci_upper, tau2, i_squared,
+            q_stat, q_pvalue, per_condition}
+    """
+    k = len(condition_data)
+    if k == 0:
+        return {
+            "pooled_rate": 0.0, "ci_lower": 0.0, "ci_upper": 0.0,
+            "tau2": 0.0, "i_squared": 0.0, "q_stat": 0.0,
+            "q_pvalue": 1.0, "per_condition": [],
+        }
+
+    # Freeman-Tukey double arcsine transformation
+    t_vals = []
+    var_vals = []
+    for d in condition_data:
+        x_i = d["switched"]
+        n_i = d["total"]
+        t_i = math.asin(math.sqrt(x_i / (n_i + 1))) + math.asin(math.sqrt((x_i + 1) / (n_i + 1)))
+        v_i = 1.0 / (n_i + 0.5)
+        t_vals.append(t_i)
+        var_vals.append(v_i)
+
+    t_vals = np.array(t_vals)
+    var_vals = np.array(var_vals)
+
+    # Fixed-effect weights
+    w_fe = 1.0 / var_vals
+    t_hat_fe = np.sum(w_fe * t_vals) / np.sum(w_fe)
+
+    # Cochran's Q statistic
+    q_stat = float(np.sum(w_fe * (t_vals - t_hat_fe) ** 2))
+
+    # DerSimonian-Laird tau2
+    sum_w = np.sum(w_fe)
+    sum_w2 = np.sum(w_fe ** 2)
+    c = sum_w - sum_w2 / sum_w
+    tau2 = max(0.0, (q_stat - (k - 1)) / c) if c > 0 else 0.0
+
+    # Random-effects weights
+    w_re = 1.0 / (var_vals + tau2)
+    t_hat_re = np.sum(w_re * t_vals) / np.sum(w_re)
+
+    # SE of pooled estimate
+    se_re = math.sqrt(1.0 / np.sum(w_re))
+
+    # Back-transform: pooled_rate = (sin(t_hat_re / 2))^2
+    pooled_rate = (math.sin(t_hat_re / 2)) ** 2
+    pooled_rate = max(0.0, min(1.0, pooled_rate))
+
+    # CI on transformed scale, then back-transform
+    z_crit = sp_stats.norm.ppf(0.975)
+    t_lower = t_hat_re - z_crit * se_re
+    t_upper = t_hat_re + z_crit * se_re
+    ci_lower = max(0.0, (math.sin(t_lower / 2)) ** 2)
+    ci_upper = min(1.0, (math.sin(t_upper / 2)) ** 2)
+
+    # I-squared
+    if q_stat > 0 and k > 1:
+        i_squared = max(0.0, (q_stat - (k - 1)) / q_stat * 100)
+    else:
+        i_squared = 0.0
+
+    # Q p-value
+    q_pvalue = float(1.0 - sp_stats.chi2.cdf(q_stat, k - 1)) if k > 1 else 1.0
+
+    # Per-condition results
+    per_condition = []
+    for i, d in enumerate(condition_data):
+        x_i = d["switched"]
+        n_i = d["total"]
+        rate_i = x_i / n_i if n_i > 0 else 0.0
+        w_i = float(w_re[i])
+        # Wilson CI for individual condition
+        ci_lo, ci_hi = wilson_ci(x_i, n_i)
+        per_condition.append({
+            "condition": d["condition"],
+            "rate": float(rate_i),
+            "weight": w_i,
+            "ci": (float(ci_lo), float(ci_hi)),
+        })
+
+    return {
+        "pooled_rate": float(pooled_rate),
+        "ci_lower": float(ci_lower),
+        "ci_upper": float(ci_upper),
+        "tau2": float(tau2),
+        "i_squared": float(i_squared),
+        "q_stat": float(q_stat),
+        "q_pvalue": float(q_pvalue),
+        "per_condition": per_condition,
+    }
+
+
+def interrupted_time_series(year_data, intervention_year=2007):
+    """Interrupted time series (segmented regression) analysis.
+
+    Fits: rate = beta0 + beta1*time + beta2*post + beta3*time_after + epsilon
+
+    Parameters
+    ----------
+    year_data : list of dict
+        Each dict has {year, rate, n}.
+    intervention_year : int
+        Year of intervention (default 2007).
+
+    Returns
+    -------
+    dict : {pre_slope, post_slope, level_change, slope_change,
+            p_level, p_slope, r_squared}
+    """
+    if len(year_data) < 4:
+        return {
+            "pre_slope": 0.0, "post_slope": 0.0,
+            "level_change": 0.0, "slope_change": 0.0,
+            "p_level": 1.0, "p_slope": 1.0, "r_squared": 0.0,
+        }
+
+    # Sort by year
+    year_data = sorted(year_data, key=lambda d: d["year"])
+    min_year = year_data[0]["year"]
+
+    n_obs = len(year_data)
+    y = np.array([d["rate"] for d in year_data])
+
+    # Build design matrix: intercept, time, post, time_after
+    X = np.zeros((n_obs, 4))
+    for i, d in enumerate(year_data):
+        yr = d["year"]
+        time_val = yr - min_year
+        post = 1.0 if yr >= intervention_year else 0.0
+        time_after = max(0.0, float(yr - intervention_year))
+        X[i, 0] = 1.0       # intercept
+        X[i, 1] = time_val  # time
+        X[i, 2] = post      # post indicator
+        X[i, 3] = time_after # time after intervention
+
+    # OLS via numpy least squares
+    result_lstsq = np.linalg.lstsq(X, y, rcond=None)
+    beta = result_lstsq[0]
+
+    # Predictions and residuals
+    y_hat = X @ beta
+    residuals = y - y_hat
+    ss_res = float(np.sum(residuals ** 2))
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+    r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+
+    # Standard errors and p-values
+    df_residual = n_obs - 4
+    if df_residual > 0:
+        mse = ss_res / df_residual
+        try:
+            cov_matrix = mse * np.linalg.inv(X.T @ X)
+            se = np.sqrt(np.abs(np.diag(cov_matrix)))
+        except np.linalg.LinAlgError:
+            se = np.full(4, float('inf'))
+    else:
+        se = np.full(4, float('inf'))
+
+    # t-statistics and p-values
+    def _t_pval(coef, se_val, df):
+        if se_val <= 0 or se_val == float('inf') or df <= 0:
+            return 1.0
+        t_stat = coef / se_val
+        return float(2 * (1 - sp_stats.t.cdf(abs(t_stat), df)))
+
+    p_level = _t_pval(beta[2], se[2], df_residual)
+    p_slope = _t_pval(beta[3], se[3], df_residual)
+
+    pre_slope = float(beta[1])
+    post_slope = float(beta[1] + beta[3])
+    level_change = float(beta[2])
+    slope_change = float(beta[3])
+
+    return {
+        "pre_slope": pre_slope,
+        "post_slope": post_slope,
+        "level_change": level_change,
+        "slope_change": slope_change,
+        "p_level": p_level,
+        "p_slope": p_slope,
+        "r_squared": r_squared,
+    }
+
+
+def mutual_information(switch_matrix):
+    """Mutual information between pairs of switch types.
+
+    Parameters
+    ----------
+    switch_matrix : array-like
+        Binary matrix (trials x switch_types).
+
+    Returns
+    -------
+    dict : {mi_matrix, normalized_mi_matrix, top_associations}
+    """
+    X = np.array(switch_matrix, dtype=float)
+    n_obs, n_types = X.shape
+
+    mi_matrix = np.zeros((n_types, n_types))
+    nmi_matrix = np.zeros((n_types, n_types))
+
+    def _entropy(col):
+        """Shannon entropy of a binary column."""
+        p1 = np.mean(col)
+        p0 = 1.0 - p1
+        h = 0.0
+        if p0 > 0:
+            h -= p0 * math.log(p0)
+        if p1 > 0:
+            h -= p1 * math.log(p1)
+        return h
+
+    def _mi(col_a, col_b):
+        """Mutual information between two binary columns."""
+        mi = 0.0
+        for x_val in [0, 1]:
+            for y_val in [0, 1]:
+                p_xy = np.mean((col_a == x_val) & (col_b == y_val))
+                p_x = np.mean(col_a == x_val)
+                p_y = np.mean(col_b == y_val)
+                if p_xy > 0 and p_x > 0 and p_y > 0:
+                    mi += p_xy * math.log(p_xy / (p_x * p_y))
+        return mi
+
+    # Compute entropies
+    entropies = [_entropy(X[:, j]) for j in range(n_types)]
+
+    # Compute MI and NMI for all pairs
+    for i in range(n_types):
+        for j in range(n_types):
+            if i == j:
+                mi_matrix[i][j] = entropies[i]
+                nmi_matrix[i][j] = 1.0 if entropies[i] > 0 else 0.0
+            else:
+                mi_val = _mi(X[:, i], X[:, j])
+                mi_matrix[i][j] = mi_val
+                denom = math.sqrt(entropies[i] * entropies[j])
+                nmi_matrix[i][j] = mi_val / denom if denom > 0 else 0.0
+
+    # Top associations (off-diagonal, upper triangle)
+    top_associations = []
+    for i in range(n_types):
+        for j in range(i + 1, n_types):
+            top_associations.append({
+                "type1": i,
+                "type2": j,
+                "nmi": float(nmi_matrix[i][j]),
+            })
+    top_associations.sort(key=lambda a: a["nmi"], reverse=True)
+
+    return {
+        "mi_matrix": mi_matrix.tolist(),
+        "normalized_mi_matrix": nmi_matrix.tolist(),
+        "top_associations": top_associations,
+    }
+
+
+def permutation_test(group1_switches, group1_total, group2_switches,
+                     group2_total, n_perms=10000, seed=42):
+    """Exact permutation test for difference in switching rates.
+
+    Parameters
+    ----------
+    group1_switches, group1_total : int
+        Switches and total for group 1.
+    group2_switches, group2_total : int
+        Switches and total for group 2.
+    n_perms : int
+        Number of permutations (default 10000).
+    seed : int
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    dict : {observed_diff, p_value, ci_lower, ci_upper}
+    """
+    rng = np.random.RandomState(seed)
+
+    n1 = int(group1_total)
+    n2 = int(group2_total)
+    s1 = int(group1_switches)
+    s2 = int(group2_switches)
+
+    rate1 = s1 / n1 if n1 > 0 else 0.0
+    rate2 = s2 / n2 if n2 > 0 else 0.0
+    observed_diff = rate1 - rate2
+
+    # Create pooled indicator array
+    pooled = np.zeros(n1 + n2)
+    pooled[:s1 + s2] = 1.0
+
+    perm_diffs = np.empty(n_perms)
+    for i in range(n_perms):
+        rng.shuffle(pooled)
+        perm_rate1 = pooled[:n1].mean()
+        perm_rate2 = pooled[n1:].mean()
+        perm_diffs[i] = perm_rate1 - perm_rate2
+
+    # Two-sided p-value
+    p_value = float(np.mean(np.abs(perm_diffs) >= np.abs(observed_diff)))
+
+    # 95% CI from permutation distribution
+    ci_lower = float(np.percentile(perm_diffs, 2.5))
+    ci_upper = float(np.percentile(perm_diffs, 97.5))
+
+    return {
+        "observed_diff": float(observed_diff),
+        "p_value": p_value,
+        "ci_lower": ci_lower,
+        "ci_upper": ci_upper,
+    }
+
+
+def negative_binomial_regression(trials_data):
+    """Negative binomial regression for switch counts per trial.
+
+    Fits: log(E[switches]) = beta0 + beta1*sponsor_industry
+          + beta2*phase_num + beta3*log_enrollment
+
+    Uses scipy.optimize.minimize on NB log-likelihood.
+
+    Parameters
+    ----------
+    trials_data : list of dict
+        Each dict has {switches, sponsor_industry, phase_num, log_enrollment}.
+
+    Returns
+    -------
+    dict : {coefficients, deviance, aic}
+    """
+    from scipy.optimize import minimize
+
+    n = len(trials_data)
+    if n == 0:
+        return {"coefficients": [], "deviance": 0.0, "aic": 0.0}
+
+    # Build arrays
+    y = np.array([d["switches"] for d in trials_data], dtype=float)
+    X = np.column_stack([
+        np.ones(n),
+        np.array([d["sponsor_industry"] for d in trials_data], dtype=float),
+        np.array([d["phase_num"] for d in trials_data], dtype=float),
+        np.array([d["log_enrollment"] for d in trials_data], dtype=float),
+    ])
+
+    feature_names = ["intercept", "sponsor_industry", "phase_num", "log_enrollment"]
+    n_features = X.shape[1]
+
+    def _nb_log_likelihood(params):
+        """Negative of NB log-likelihood (for minimization)."""
+        beta = params[:n_features]
+        log_alpha = params[n_features]  # log of overdispersion
+        alpha = math.exp(max(-20, min(20, log_alpha)))
+
+        mu = np.exp(np.clip(X @ beta, -20, 20))
+        r = 1.0 / alpha if alpha > 1e-10 else 1e10  # r = 1/alpha
+
+        # NB log-likelihood: sum of log(NB(y_i; r, p_i))
+        # where p_i = r / (r + mu_i)
+        ll = 0.0
+        for i in range(n):
+            yi = y[i]
+            mu_i = mu[i]
+            ri = r
+            # Use lgamma for numerical stability
+            ll += (
+                math.lgamma(yi + ri) - math.lgamma(yi + 1) - math.lgamma(ri)
+                + ri * math.log(ri / (ri + mu_i))
+                + yi * math.log(mu_i / (ri + mu_i))
+            )
+
+        return -ll  # minimize negative LL
+
+    # Initial values: Poisson MLE approximation
+    init_beta = np.zeros(n_features)
+    mean_y = np.mean(y)
+    if mean_y > 0:
+        init_beta[0] = math.log(mean_y)
+    init_params = np.concatenate([init_beta, [0.0]])  # log_alpha = 0 -> alpha = 1
+
+    try:
+        opt_result = minimize(
+            _nb_log_likelihood, init_params,
+            method='Nelder-Mead',
+            options={'maxiter': 5000, 'xatol': 1e-8, 'fatol': 1e-8},
+        )
+        params_hat = opt_result.x
+        neg_ll = opt_result.fun
+    except Exception:
+        # Fallback: return Poisson-like results
+        params_hat = init_params
+        neg_ll = _nb_log_likelihood(init_params)
+
+    beta_hat = params_hat[:n_features]
+    log_alpha_hat = params_hat[n_features]
+
+    # Standard errors via finite-difference Hessian
+    eps = 1e-5
+    n_params = len(params_hat)
+    hessian = np.zeros((n_params, n_params))
+    f0 = _nb_log_likelihood(params_hat)
+    for i_p in range(n_params):
+        for j_p in range(i_p, n_params):
+            params_pp = params_hat.copy()
+            params_pm = params_hat.copy()
+            params_mp = params_hat.copy()
+            params_mm = params_hat.copy()
+            params_pp[i_p] += eps
+            params_pp[j_p] += eps
+            params_pm[i_p] += eps
+            params_pm[j_p] -= eps
+            params_mp[i_p] -= eps
+            params_mp[j_p] += eps
+            params_mm[i_p] -= eps
+            params_mm[j_p] -= eps
+            h = (
+                _nb_log_likelihood(params_pp)
+                - _nb_log_likelihood(params_pm)
+                - _nb_log_likelihood(params_mp)
+                + _nb_log_likelihood(params_mm)
+            ) / (4 * eps * eps)
+            hessian[i_p, j_p] = h
+            hessian[j_p, i_p] = h
+
+    try:
+        cov = np.linalg.inv(hessian)
+        se = np.sqrt(np.abs(np.diag(cov)))
+    except np.linalg.LinAlgError:
+        se = np.full(n_params, float('inf'))
+
+    # Build coefficient table (skip intercept in output, but include it)
+    z_crit = sp_stats.norm.ppf(0.975)
+    coefficients = []
+    for i_c in range(n_features):
+        coef = float(beta_hat[i_c])
+        se_i = float(se[i_c]) if i_c < len(se) else float('inf')
+        z_val = coef / se_i if se_i > 0 and se_i != float('inf') else 0.0
+        p_val = float(2 * (1 - sp_stats.norm.cdf(abs(z_val))))
+        irr = math.exp(max(-700, min(700, coef)))
+        if se_i != float('inf'):
+            irr_lo = math.exp(max(-700, min(700, coef - z_crit * se_i)))
+            irr_hi = math.exp(max(-700, min(700, coef + z_crit * se_i)))
+        else:
+            irr_lo = 0.0
+            irr_hi = float('inf')
+        coefficients.append({
+            "feature": feature_names[i_c],
+            "coef": coef,
+            "se": se_i,
+            "z": z_val,
+            "p_value": p_val,
+            "irr": irr,
+            "irr_ci": (irr_lo, irr_hi),
+        })
+
+    # Deviance and AIC
+    # Saturated model log-lik approximation
+    mu_hat = np.exp(np.clip(X @ beta_hat, -20, 20))
+    deviance = float(2 * neg_ll)  # simplified deviance
+    aic = float(2 * neg_ll + 2 * (n_features + 1))
+
+    return {
+        "coefficients": coefficients,
+        "deviance": deviance,
+        "aic": aic,
+    }
