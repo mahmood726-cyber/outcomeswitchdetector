@@ -58,6 +58,42 @@ def _timeframe_differs(tf1, tf2):
     return False
 
 
+# Pattern to strip embedded timeframe from measure text
+_TIMEFRAME_PATTERN = re.compile(
+    r'\b(?:at|over|during|through|by|within)\s+\d+\s*(?:month|week|day|year)s?\b',
+    re.IGNORECASE
+)
+
+
+def _strip_timeframe(text):
+    """Remove embedded timeframe phrases from endpoint text."""
+    return _TIMEFRAME_PATTERN.sub('', text).strip()
+
+
+def _is_timeframe_only_change(measure1, measure2):
+    """Check if two measures differ only in their embedded timeframe.
+
+    Returns True if stripping the timeframe portion makes them match (>=0.85),
+    AND the timeframe portions actually differ.
+    """
+    stripped1 = _strip_timeframe(measure1)
+    stripped2 = _strip_timeframe(measure2)
+
+    # The core measure must match after stripping timeframes
+    core_sim = compute_similarity(stripped1, stripped2)
+    if core_sim < SAME_THRESHOLD:
+        return False
+
+    # The original texts must actually differ in their timeframe part
+    tf1 = _TIMEFRAME_PATTERN.findall(measure1)
+    tf2 = _TIMEFRAME_PATTERN.findall(measure2)
+
+    if tf1 != tf2:
+        return True
+
+    return False
+
+
 def detect_switches(trial):
     """Compare registered (protocol) vs reported (results) outcomes.
 
@@ -114,14 +150,22 @@ def detect_switches(trial):
             })
             continue
 
-        # Check if it's a modified primary
+        # Check if it's a modified primary — but first check for embedded timeframe change
         if sim_rp >= MODIFIED_THRESHOLD and idx_rp not in matched_results_primary:
             matched_results_primary.add(idx_rp)
-            switches.append({
-                "category": "MEASURE_MODIFIED",
-                "endpoint": pp,
-                "detail": f"Primary endpoint modified: '{pp}' -> '{results_primary[idx_rp]}' (similarity={sim_rp:.2f})"
-            })
+            # Detect timeframe-only changes embedded in measure text
+            if _is_timeframe_only_change(pp, results_primary[idx_rp]):
+                switches.append({
+                    "category": "TIMEFRAME_CHANGE",
+                    "endpoint": _strip_timeframe(pp),
+                    "detail": f"Timeframe changed in measure text: '{pp}' -> '{results_primary[idx_rp]}'"
+                })
+            else:
+                switches.append({
+                    "category": "MEASURE_MODIFIED",
+                    "endpoint": pp,
+                    "detail": f"Primary endpoint modified: '{pp}' -> '{results_primary[idx_rp]}' (similarity={sim_rp:.2f})"
+                })
             continue
 
         # Not found anywhere — PRIMARY_REMOVED
