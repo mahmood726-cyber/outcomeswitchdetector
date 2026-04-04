@@ -1,4 +1,4 @@
-"""25 tests for stats_engine module."""
+"""33 tests for stats_engine module."""
 
 import os
 import sys
@@ -25,6 +25,11 @@ from src.stats_engine import (
     mutual_information,
     permutation_test,
     negative_binomial_regression,
+    transfer_entropy,
+    mdl_model_selection,
+    difference_in_differences,
+    wasserstein_switching,
+    extreme_value_analysis,
 )
 
 
@@ -342,3 +347,170 @@ class TestNegativeBinomial:
         ]
         result = negative_binomial_regression(trials_data)
         assert all(c["irr"] > 0 for c in result["coefficients"])
+
+
+# ============================================================
+# Layer 4 — Transfer Entropy (2)
+# ============================================================
+
+
+class TestTransferEntropy:
+    def test_te_independent(self):
+        """Independent switch types should have TE near zero."""
+        import numpy as np
+        rng = np.random.RandomState(123)
+        # 10 sequences of length 50 with 6 independent binary switch types
+        seqs = [rng.randint(0, 2, size=(50, 6)) for _ in range(10)]
+        result = transfer_entropy(seqs, lag=1, seed=42)
+        # TE matrix should be 6x6
+        assert len(result["te_matrix"]) == 6
+        assert len(result["te_matrix"][0]) == 6
+        # All TEs should be near zero for independent data
+        for i in range(6):
+            for j in range(6):
+                if i != j:
+                    assert abs(result["te_matrix"][i][j]) < 0.15
+
+    def test_te_causal(self):
+        """Causal link X0->X1 should show TE[0->1] > TE[1->0]."""
+        import numpy as np
+        rng = np.random.RandomState(99)
+        seqs = []
+        for _ in range(20):
+            seq = np.zeros((60, 6), dtype=int)
+            # X0 is random
+            seq[:, 0] = rng.randint(0, 2, 60)
+            # X1 copies X0 with lag 1 (causal link)
+            seq[1:, 1] = seq[:-1, 0]
+            # Other columns random
+            for c in range(2, 6):
+                seq[:, c] = rng.randint(0, 2, 60)
+            seqs.append(seq)
+        result = transfer_entropy(seqs, lag=1, seed=42)
+        # TE(0->1) should be larger than TE(1->0)
+        te_0_to_1 = result["te_matrix"][0][1]
+        te_1_to_0 = result["te_matrix"][1][0]
+        assert te_0_to_1 > te_1_to_0
+
+
+# ============================================================
+# Layer 4 — MDL Model Selection (1)
+# ============================================================
+
+
+class TestMDL:
+    def test_mdl_bimodal(self):
+        """Bimodal data should select k >= 2."""
+        import numpy as np
+        rng = np.random.RandomState(42)
+        # Cluster 1: high on types 0-2
+        c1 = np.column_stack([
+            rng.binomial(1, 0.9, (40, 3)),
+            rng.binomial(1, 0.1, (40, 3)),
+        ])
+        # Cluster 2: high on types 3-5
+        c2 = np.column_stack([
+            rng.binomial(1, 0.1, (40, 3)),
+            rng.binomial(1, 0.9, (40, 3)),
+        ])
+        data = np.vstack([c1, c2]).tolist()
+        result = mdl_model_selection(data, max_components=6)
+        assert result["best_k"] >= 2
+        assert len(result["mdl_scores"]) >= 2
+
+
+# ============================================================
+# Layer 4 — Difference-in-Differences (2)
+# ============================================================
+
+
+class TestDiD:
+    def test_did_significant_effect(self):
+        """Clear policy effect should be significant."""
+        import numpy as np
+        rng = np.random.RandomState(42)
+        # Treatment: flat around 0.30 before 2007, jumps to ~0.50 after
+        treatment = [
+            {"year": y,
+             "rate": (0.30 + rng.normal(0, 0.02) if y < 2007
+                      else 0.50 + rng.normal(0, 0.02)),
+             "n": 100}
+            for y in range(2000, 2015)
+        ]
+        # Control: stays flat at ~0.30 throughout
+        control = [
+            {"year": y, "rate": 0.30 + rng.normal(0, 0.02), "n": 100}
+            for y in range(2000, 2015)
+        ]
+        result = difference_in_differences(treatment, control, 2007)
+        assert result["p_value"] < 0.05
+        assert result["att"] > 0  # treatment effect positive
+
+    def test_did_parallel_pretrends(self):
+        """Parallel pre-trends should have pre_trend_p > 0.05."""
+        # Both groups have same pre-trend
+        treatment = [
+            {"year": y, "rate": 0.3 + 0.01 * (y - 2000), "n": 100}
+            for y in range(2000, 2007)
+        ] + [
+            {"year": y, "rate": 0.6 + 0.01 * (y - 2000), "n": 100}
+            for y in range(2007, 2015)
+        ]
+        control = [
+            {"year": y, "rate": 0.3 + 0.01 * (y - 2000), "n": 100}
+            for y in range(2000, 2015)
+        ]
+        result = difference_in_differences(treatment, control, 2007)
+        assert result["pre_trend_p"] > 0.05
+
+
+# ============================================================
+# Layer 4 — Wasserstein Distance (2)
+# ============================================================
+
+
+class TestWasserstein:
+    def test_wasserstein_identical(self):
+        """Identical profiles should have distance 0."""
+        profiles = [
+            {"sponsor": "A", "profile": [0.3, 0.2, 0.1, 0.1, 0.2, 0.1]},
+            {"sponsor": "B", "profile": [0.3, 0.2, 0.1, 0.1, 0.2, 0.1]},
+        ]
+        result = wasserstein_switching(profiles)
+        assert abs(result["distance_matrix"][0][1]) < 1e-10
+
+    def test_wasserstein_different(self):
+        """Very different profiles should have distance > 0.5."""
+        profiles = [
+            {"sponsor": "X", "profile": [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+            {"sponsor": "Y", "profile": [0.0, 0.0, 0.0, 0.0, 0.0, 1.0]},
+        ]
+        result = wasserstein_switching(profiles)
+        assert result["distance_matrix"][0][1] > 0.5
+        # Clusters and embedding should exist
+        assert len(result["clusters"]) == 2
+        assert len(result["mds_embedding"]) == 2
+
+
+# ============================================================
+# Layer 4 — Extreme Value Analysis / GPD (1)
+# ============================================================
+
+
+class TestGPD:
+    def test_gpd_heavy_tailed(self):
+        """GPD fit on heavy-tailed data should produce return levels."""
+        import numpy as np
+        rng = np.random.RandomState(42)
+        # Pareto-like data: most small, some very large
+        data = np.concatenate([
+            rng.exponential(2, 200),
+            rng.exponential(20, 20),  # tail events
+        ])
+        result = extreme_value_analysis(data, threshold_quantile=0.90)
+        assert result["n_exceedances"] > 0
+        assert result["threshold"] > 0
+        assert len(result["return_levels"]) == 3
+        # Return levels should increase with period
+        levels = [rl["level"] for rl in result["return_levels"]]
+        assert levels[0] <= levels[1] <= levels[2]
