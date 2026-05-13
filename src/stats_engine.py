@@ -7,6 +7,8 @@ Layer 2 (Methodologically Novel): Bayesian hierarchical model,
 Layer 3 (Advanced): Meta-analysis of switching rates, interrupted time
     series, mutual information, permutation test, negative binomial
     regression.
+Layer 4 (Cutting-Edge): Transfer entropy, MDL model selection,
+    difference-in-differences, Wasserstein distance, GPD extreme value.
 """
 
 import math
@@ -1236,4 +1238,583 @@ def negative_binomial_regression(trials_data):
         "coefficients": coefficients,
         "deviance": deviance,
         "aic": aic,
+    }
+
+
+# ============================================================
+# Layer 4 — Cutting-Edge Mathematical Methods (5 methods)
+# ============================================================
+
+
+def transfer_entropy(switch_sequences, lag=1, seed=42):
+    """Transfer entropy between switch types (directed information flow).
+
+    Measures whether the occurrence of switch type A predicts future
+    occurrence of switch type B.
+
+    Parameters
+    ----------
+    switch_sequences : list of array-like
+        Each element is a (T, 6) matrix of binary indicators for 6 switch
+        types across T time steps.  Multiple sequences (trials/studies)
+        are pooled for frequency estimation.
+    lag : int
+        Time lag for the transfer entropy calculation.
+    seed : int
+        Random seed for surrogate significance testing.
+
+    Returns
+    -------
+    dict : {te_matrix: 6x6, significant_flows: [{source, target, te,
+            z_score, p_value}]}
+    """
+    rng = np.random.RandomState(seed)
+    seqs = [np.asarray(s, dtype=int) for s in switch_sequences]
+    n_types = seqs[0].shape[1] if len(seqs) > 0 and seqs[0].ndim == 2 else 6
+
+    def _compute_te(sequences, src, tgt, lag_val):
+        """Compute TE(src -> tgt) from frequency counts."""
+        # Collect triplets: (y_{t+lag}, y_t, x_t)
+        counts_yyx = defaultdict(int)  # (y_{t+lag}, y_t, x_t)
+        counts_yx = defaultdict(int)   # (y_t, x_t)
+        counts_yy = defaultdict(int)   # (y_{t+lag}, y_t)
+        counts_y = defaultdict(int)    # (y_t)
+
+        for seq in sequences:
+            T = seq.shape[0]
+            for t in range(T - lag_val):
+                y_t = int(seq[t, tgt])
+                x_t = int(seq[t, src])
+                y_next = int(seq[t + lag_val, tgt])
+                counts_yyx[(y_next, y_t, x_t)] += 1
+                counts_yx[(y_t, x_t)] += 1
+                counts_yy[(y_next, y_t)] += 1
+                counts_y[(y_t,)] += 1
+
+        total = sum(counts_yyx.values())
+        if total == 0:
+            return 0.0
+
+        te = 0.0
+        for (y_next, y_t, x_t), count in counts_yyx.items():
+            p_yyx = count / total
+            p_ynext_given_yx = count / counts_yx[(y_t, x_t)] if counts_yx[(y_t, x_t)] > 0 else 0
+            p_ynext_given_y = counts_yy[(y_next, y_t)] / counts_y[(y_t,)] if counts_y[(y_t,)] > 0 else 0
+            if p_ynext_given_yx > 0 and p_ynext_given_y > 0:
+                te += p_yyx * math.log2(p_ynext_given_yx / p_ynext_given_y)
+        return te
+
+    # Compute TE matrix
+    te_matrix = [[0.0] * n_types for _ in range(n_types)]
+    for i in range(n_types):
+        for j in range(n_types):
+            if i != j:
+                te_matrix[i][j] = _compute_te(seqs, i, j, lag)
+
+    # Surrogate significance testing (200 surrogates)
+    n_surrogates = 200
+    significant_flows = []
+    for i in range(n_types):
+        for j in range(n_types):
+            if i == j:
+                continue
+            observed_te = te_matrix[i][j]
+            # Shuffle source column across all sequences
+            surrogate_tes = []
+            for _ in range(n_surrogates):
+                shuffled_seqs = []
+                for seq in seqs:
+                    s_copy = seq.copy()
+                    rng.shuffle(s_copy[:, i])
+                    shuffled_seqs.append(s_copy)
+                surrogate_tes.append(_compute_te(shuffled_seqs, i, j, lag))
+            surrogate_tes = np.array(surrogate_tes)
+            mu_s = np.mean(surrogate_tes)
+            std_s = np.std(surrogate_tes)
+            if std_s > 1e-15:
+                z_score = (observed_te - mu_s) / std_s
+            else:
+                z_score = 0.0
+            p_value = float(2 * (1 - sp_stats.norm.cdf(abs(z_score))))
+            if p_value < 0.05:
+                significant_flows.append({
+                    "source": i,
+                    "target": j,
+                    "te": float(observed_te),
+                    "z_score": float(z_score),
+                    "p_value": p_value,
+                })
+
+    return {
+        "te_matrix": te_matrix,
+        "significant_flows": significant_flows,
+    }
+
+
+def mdl_model_selection(data, max_components=6):
+    """Minimum Description Length model selection for latent classes.
+
+    Selects the number of latent classes in switching behaviour using
+    the MDL principle, which is more principled than BIC for model
+    selection.
+
+    Parameters
+    ----------
+    data : list of list
+        Each row is a binary indicator vector (length 6) for switch types.
+    max_components : int
+        Maximum number of components to evaluate.
+
+    Returns
+    -------
+    dict : {best_k, mdl_scores: [], description_length: [],
+            model_complexity: []}
+    """
+    X = np.array(data, dtype=float)
+    n, d = X.shape
+    max_k = min(max_components, n)
+
+    mdl_scores = []
+    description_lengths = []
+    model_complexities = []
+
+    for k in range(1, max_k + 1):
+        # EM for k-component mixture of independent Bernoullis
+        rng_em = np.random.RandomState(42)
+
+        # Initialize
+        pi = np.ones(k) / k
+        # Random initialization with slight perturbation
+        theta = rng_em.uniform(0.2, 0.8, size=(k, d))
+        # Ensure numerical stability
+        theta = np.clip(theta, 1e-10, 1 - 1e-10)
+
+        log_lik = -np.inf
+        for _iter in range(100):
+            # E-step: compute responsibilities
+            log_resp = np.zeros((n, k))
+            for c in range(k):
+                log_p = np.sum(
+                    X * np.log(theta[c] + 1e-300)
+                    + (1 - X) * np.log(1 - theta[c] + 1e-300),
+                    axis=1,
+                )
+                log_resp[:, c] = np.log(pi[c] + 1e-300) + log_p
+
+            # Log-sum-exp for stability
+            max_log = np.max(log_resp, axis=1, keepdims=True)
+            log_sum = max_log + np.log(
+                np.sum(np.exp(log_resp - max_log), axis=1, keepdims=True)
+            )
+            resp = np.exp(log_resp - log_sum)
+            new_log_lik = float(np.sum(log_sum))
+
+            if abs(new_log_lik - log_lik) < 1e-6:
+                break
+            log_lik = new_log_lik
+
+            # M-step
+            nk = resp.sum(axis=0) + 1e-10
+            pi = nk / n
+            for c in range(k):
+                theta[c] = (resp[:, c] @ X) / nk[c]
+                theta[c] = np.clip(theta[c], 1e-10, 1 - 1e-10)
+
+        # MDL = -log L + (d_k / 2) * log(n)
+        # Free parameters: (k-1) mixing weights + k*d Bernoulli params
+        d_k = (k - 1) + k * d
+        neg_log_lik = -log_lik
+        complexity = (d_k / 2) * math.log(n)
+        mdl = neg_log_lik + complexity
+
+        mdl_scores.append(float(mdl))
+        description_lengths.append(float(neg_log_lik))
+        model_complexities.append(float(complexity))
+
+    best_idx = int(np.argmin(mdl_scores))
+    best_k = best_idx + 1
+
+    return {
+        "best_k": best_k,
+        "mdl_scores": mdl_scores,
+        "description_length": description_lengths,
+        "model_complexity": model_complexities,
+    }
+
+
+def difference_in_differences(treatment_rates, control_rates,
+                               intervention_time):
+    """Difference-in-differences for FDAAA policy impact.
+
+    Treatment group: trials subject to FDAAA (Phase 2+ industry).
+    Control group: academic/Phase 1 (exempt).
+
+    Parameters
+    ----------
+    treatment_rates : list of dict
+        Each dict has {year, rate, n}.
+    control_rates : list of dict
+        Each dict has {year, rate, n}.
+    intervention_time : int
+        Year of the policy intervention (e.g., 2007 for FDAAA).
+
+    Returns
+    -------
+    dict : {att, se, ci_lower, ci_upper, p_value,
+            parallel_trends_test, pre_trend_p}
+    """
+    # Build panel data: Y_it = alpha + beta*treat + gamma*post
+    #                          + delta*(treat*post) + epsilon
+    years = []
+    rates = []
+    treat = []
+    post = []
+    weights = []
+
+    for r in treatment_rates:
+        years.append(r["year"])
+        rates.append(r["rate"])
+        treat.append(1)
+        post.append(1 if r["year"] >= intervention_time else 0)
+        weights.append(r.get("n", 1))
+
+    for r in control_rates:
+        years.append(r["year"])
+        rates.append(r["rate"])
+        treat.append(0)
+        post.append(1 if r["year"] >= intervention_time else 0)
+        weights.append(r.get("n", 1))
+
+    y = np.array(rates)
+    X = np.column_stack([
+        np.ones(len(y)),        # intercept
+        np.array(treat),        # treatment dummy
+        np.array(post),         # post-intervention dummy
+        np.array(treat) * np.array(post),  # DiD interaction
+    ])
+    w = np.array(weights, dtype=float)
+
+    # WLS: (X'WX)^{-1} X'Wy
+    W = np.diag(w)
+    XtW = X.T @ W
+    XtWX = XtW @ X
+    try:
+        XtWX_inv = np.linalg.inv(XtWX)
+    except np.linalg.LinAlgError:
+        XtWX_inv = np.linalg.pinv(XtWX)
+    beta_hat = XtWX_inv @ (XtW @ y)
+
+    # Residuals and SE
+    resid = y - X @ beta_hat
+    n_obs = len(y)
+    p_params = X.shape[1]
+    sigma2 = float(np.sum(w * resid ** 2) / max(n_obs - p_params, 1))
+    cov_beta = sigma2 * XtWX_inv
+    se = np.sqrt(np.abs(np.diag(cov_beta)))
+
+    att = float(beta_hat[3])        # delta coefficient
+    se_att = float(se[3])
+    z = att / se_att if se_att > 1e-15 else 0.0
+    p_value = float(2 * (1 - sp_stats.norm.cdf(abs(z))))
+    z_crit = sp_stats.norm.ppf(0.975)
+    ci_lower = att - z_crit * se_att
+    ci_upper = att + z_crit * se_att
+
+    # Pre-trends test: is the treatment-specific slope = 0 before
+    # the intervention?
+    pre_treat_years = []
+    pre_treat_rates = []
+    pre_ctrl_years = []
+    pre_ctrl_rates = []
+    pre_treat_w = []
+    pre_ctrl_w = []
+
+    for r in treatment_rates:
+        if r["year"] < intervention_time:
+            pre_treat_years.append(r["year"])
+            pre_treat_rates.append(r["rate"])
+            pre_treat_w.append(r.get("n", 1))
+    for r in control_rates:
+        if r["year"] < intervention_time:
+            pre_ctrl_years.append(r["year"])
+            pre_ctrl_rates.append(r["rate"])
+            pre_ctrl_w.append(r.get("n", 1))
+
+    # Test parallel pre-trends: regress (treat_rate - ctrl_rate) on year
+    # If we have paired years, compute differences; otherwise use
+    # interaction model
+    pre_trend_p = 1.0
+    if len(pre_treat_years) >= 3 and len(pre_ctrl_years) >= 3:
+        # Build pre-period interaction model
+        pre_y = np.array(pre_treat_rates + pre_ctrl_rates)
+        pre_n = len(pre_y)
+        pre_years_all = np.array(pre_treat_years + pre_ctrl_years,
+                                 dtype=float)
+        pre_treat_dummy = np.array(
+            [1.0] * len(pre_treat_years) + [0.0] * len(pre_ctrl_years)
+        )
+        pre_year_centered = pre_years_all - np.mean(pre_years_all)
+        pre_X = np.column_stack([
+            np.ones(pre_n),
+            pre_treat_dummy,
+            pre_year_centered,
+            pre_treat_dummy * pre_year_centered,  # interaction
+        ])
+        pre_w = np.array(pre_treat_w + pre_ctrl_w, dtype=float)
+        Wp = np.diag(pre_w)
+        XpW = pre_X.T @ Wp
+        try:
+            pre_beta = np.linalg.solve(XpW @ pre_X, XpW @ pre_y)
+        except np.linalg.LinAlgError:
+            pre_beta = np.linalg.lstsq(pre_X, pre_y, rcond=None)[0]
+        pre_resid = pre_y - pre_X @ pre_beta
+        pre_sigma2 = float(
+            np.sum(pre_w * pre_resid ** 2) / max(pre_n - 4, 1)
+        )
+        try:
+            pre_cov = pre_sigma2 * np.linalg.inv(XpW @ pre_X)
+        except np.linalg.LinAlgError:
+            pre_cov = pre_sigma2 * np.linalg.pinv(XpW @ pre_X)
+        pre_se = np.sqrt(np.abs(np.diag(pre_cov)))
+        # Test coefficient on interaction (index 3)
+        if pre_se[3] > 1e-15:
+            pre_z = pre_beta[3] / pre_se[3]
+            pre_trend_p = float(2 * (1 - sp_stats.norm.cdf(abs(pre_z))))
+        else:
+            pre_trend_p = 1.0
+
+    return {
+        "att": att,
+        "se": se_att,
+        "ci_lower": float(ci_lower),
+        "ci_upper": float(ci_upper),
+        "p_value": p_value,
+        "parallel_trends_test": float(pre_trend_p),
+        "pre_trend_p": float(pre_trend_p),
+    }
+
+
+def wasserstein_switching(sponsor_profiles):
+    """Wasserstein (earth mover's) distance between sponsor distributions.
+
+    Computes pairwise W_1 distance between sponsors' switching type
+    distributions, then performs MDS embedding into 2D and clustering.
+
+    Parameters
+    ----------
+    sponsor_profiles : list of dict
+        Each dict has {sponsor: str, profile: [float]*6} where profile
+        is the switching type distribution (should sum to ~1).
+
+    Returns
+    -------
+    dict : {distance_matrix: NxN, mds_embedding: Nx2, clusters: []}
+    """
+    from sklearn.manifold import MDS
+    from sklearn.cluster import AgglomerativeClustering
+
+    n = len(sponsor_profiles)
+    if n == 0:
+        return {
+            "distance_matrix": [],
+            "mds_embedding": [],
+            "clusters": [],
+        }
+    if n == 1:
+        return {
+            "distance_matrix": [[0.0]],
+            "mds_embedding": [[0.0, 0.0]],
+            "clusters": [0],
+        }
+
+    profiles = []
+    expected_len = None
+    for sponsor_profile in sponsor_profiles:
+        profile = np.array(sponsor_profile["profile"], dtype=float)
+        if profile.ndim != 1 or profile.size == 0:
+            raise ValueError("Each sponsor profile must be a non-empty 1D vector")
+        if expected_len is None:
+            expected_len = profile.size
+        elif profile.size != expected_len:
+            raise ValueError("All sponsor profiles must have the same length")
+        if not np.all(np.isfinite(profile)):
+            raise ValueError("Sponsor profiles must contain finite values")
+        if np.any(profile < 0):
+            raise ValueError("Sponsor profiles cannot contain negative weights")
+        if float(profile.sum()) <= 0:
+            raise ValueError("Sponsor profiles must have positive total weight")
+        profiles.append(profile)
+
+    # Compute pairwise Wasserstein distances
+    dist_matrix = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = float(sp_stats.wasserstein_distance(
+                range(len(profiles[i])),
+                range(len(profiles[j])),
+                profiles[i],
+                profiles[j],
+            ))
+            dist_matrix[i][j] = d
+            dist_matrix[j][i] = d
+
+    if not np.any(np.array(dist_matrix, dtype=float)):
+        return {
+            "distance_matrix": dist_matrix,
+            "mds_embedding": [[0.0, 0.0] for _ in range(n)],
+            "clusters": [0 for _ in range(n)],
+        }
+
+    # MDS embedding into 2D
+    dist_arr = np.array(dist_matrix)
+    if n >= 2:
+        mds = MDS(
+            n_components=min(2, n - 1),
+            dissimilarity="precomputed",
+            random_state=42,
+            normalized_stress="auto",
+            n_init=4,
+        )
+        embedding = mds.fit_transform(dist_arr)
+        if embedding.shape[1] == 1:
+            embedding = np.column_stack(
+                [embedding, np.zeros(embedding.shape[0])]
+            )
+    else:
+        embedding = np.zeros((n, 2))
+
+    # Cluster similar sponsors
+    if n >= 2:
+        max_clusters = min(n, max(2, n // 2))
+        clust = AgglomerativeClustering(
+            n_clusters=max_clusters,
+            metric="precomputed",
+            linkage="average",
+        )
+        clust.fit(dist_arr)
+        clusters = clust.labels_.tolist()
+    else:
+        clusters = [0]
+
+    return {
+        "distance_matrix": dist_matrix,
+        "mds_embedding": embedding.tolist(),
+        "clusters": clusters,
+    }
+
+
+def extreme_value_analysis(switch_counts, threshold_quantile=0.90):
+    """Generalized Pareto Distribution for extreme switchers.
+
+    Models the tail of switch count distribution using GPD
+    (Peak Over Threshold).
+
+    Parameters
+    ----------
+    switch_counts : array-like
+        Switch counts per sponsor/trial.
+    threshold_quantile : float
+        Quantile to use as threshold (default 0.90).
+
+    Returns
+    -------
+    dict : {shape_xi, scale_sigma, exceedance_prob, return_levels:
+            [{period, level, ci}], threshold, n_exceedances}
+    """
+    from scipy.optimize import minimize
+
+    data = np.asarray(switch_counts, dtype=float)
+    n_total = len(data)
+    threshold = float(np.quantile(data, threshold_quantile))
+
+    # Exceedances above threshold
+    exceedances = data[data > threshold] - threshold
+    n_exc = len(exceedances)
+
+    if n_exc < 3:
+        # Not enough exceedances for GPD fit
+        return {
+            "shape_xi": 0.0,
+            "scale_sigma": 0.0,
+            "exceedance_prob": 0.0,
+            "return_levels": [],
+            "threshold": threshold,
+            "n_exceedances": int(n_exc),
+        }
+
+    # GPD MLE: P(X > x | X > u) = (1 + xi*(x-u)/sigma)^(-1/xi)
+    def neg_log_lik(params):
+        xi, log_sigma = params
+        sigma = math.exp(log_sigma)
+        if sigma <= 0:
+            return 1e20
+        z = exceedances / sigma
+        if abs(xi) < 1e-10:
+            # Exponential case
+            return n_exc * log_sigma + np.sum(z)
+        # Check support constraint: 1 + xi*z > 0
+        check = 1 + xi * z
+        if np.any(check <= 0):
+            return 1e20
+        return n_exc * log_sigma + (1 + 1 / xi) * np.sum(np.log(check))
+
+    # Try multiple starting points
+    best_result = None
+    best_nll = np.inf
+    for xi_init in [-0.1, 0.0, 0.1, 0.5]:
+        sigma_init = np.std(exceedances) if np.std(exceedances) > 0 else 1.0
+        try:
+            res = minimize(
+                neg_log_lik,
+                [xi_init, math.log(sigma_init)],
+                method="Nelder-Mead",
+                options={"maxiter": 2000, "xatol": 1e-8, "fatol": 1e-8},
+            )
+            if res.fun < best_nll:
+                best_nll = res.fun
+                best_result = res
+        except Exception:
+            continue
+
+    if best_result is None:
+        return {
+            "shape_xi": 0.0,
+            "scale_sigma": float(np.mean(exceedances)),
+            "exceedance_prob": float(n_exc / n_total),
+            "return_levels": [],
+            "threshold": threshold,
+            "n_exceedances": int(n_exc),
+        }
+
+    xi = float(best_result.x[0])
+    sigma = float(math.exp(best_result.x[1]))
+    exc_prob = n_exc / n_total
+
+    # Return levels: level for return period m means P(X > level) = 1/m
+    return_levels = []
+    for period in [10, 50, 100]:
+        # Return level: u + sigma/xi * ((m * exc_prob)^xi - 1)
+        m_zeta = period * exc_prob
+        if abs(xi) < 1e-10:
+            level = threshold + sigma * math.log(m_zeta) if m_zeta > 0 else threshold
+        else:
+            level = threshold + (sigma / xi) * (m_zeta ** xi - 1)
+
+        # Approximate CI via delta method (simplified)
+        se_level = sigma * 0.5  # rough approximation
+        z_crit = sp_stats.norm.ppf(0.975)
+        return_levels.append({
+            "period": period,
+            "level": float(level),
+            "ci": (float(level - z_crit * se_level),
+                   float(level + z_crit * se_level)),
+        })
+
+    return {
+        "shape_xi": xi,
+        "scale_sigma": sigma,
+        "exceedance_prob": float(exc_prob),
+        "return_levels": return_levels,
+        "threshold": threshold,
+        "n_exceedances": int(n_exc),
     }

@@ -479,6 +479,17 @@ class TestWasserstein:
         result = wasserstein_switching(profiles)
         assert abs(result["distance_matrix"][0][1]) < 1e-10
 
+    def test_wasserstein_identical_short_circuits_degenerate_mds(self):
+        """Identical profiles should not enter a degenerate MDS fit."""
+        profiles = [
+            {"sponsor": "A", "profile": [0.3, 0.2, 0.1, 0.1, 0.2, 0.1]},
+            {"sponsor": "B", "profile": [0.3, 0.2, 0.1, 0.1, 0.2, 0.1]},
+            {"sponsor": "C", "profile": [0.3, 0.2, 0.1, 0.1, 0.2, 0.1]},
+        ]
+        result = wasserstein_switching(profiles)
+        assert result["mds_embedding"] == [[0.0, 0.0]] * 3
+        assert result["clusters"] == [0, 0, 0]
+
     def test_wasserstein_different(self):
         """Very different profiles should have distance > 0.5."""
         profiles = [
@@ -490,6 +501,15 @@ class TestWasserstein:
         # Clusters and embedding should exist
         assert len(result["clusters"]) == 2
         assert len(result["mds_embedding"]) == 2
+
+    def test_wasserstein_rejects_invalid_profiles(self):
+        """Invalid profiles should fail closed before SciPy/sklearn calls."""
+        profiles = [
+            {"sponsor": "A", "profile": [0.0, 0.0, 0.0]},
+            {"sponsor": "B", "profile": [0.1, 0.2, 0.7]},
+        ]
+        with pytest.raises(ValueError, match="positive total weight"):
+            wasserstein_switching(profiles)
 
 
 # ============================================================
