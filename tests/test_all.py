@@ -231,12 +231,12 @@ class TestAggregator:
         assert result["Heart Failure"]["trials_with_switches"] == 0
 
     def test_aggregate_by_era(self, sample_trials):
-        """Era rollup should classify all fixture trials as pre-FDAAA."""
+        """Unknown submission dates cannot be inferred from NCT numeric order."""
         analyzed = self._make_analyzed(sample_trials)
         result = aggregate_by_era(analyzed)
-        # All fixture NCT IDs are < 500000
-        assert "pre-FDAAA" in result
-        assert result["pre-FDAAA"]["total_trials"] == 3
+        # Fixture records carry no authentic submission dates.
+        assert "unknown_submission_date" in result
+        assert result["unknown_submission_date"]["total_trials"] == 3
 
 
 # ============================================================

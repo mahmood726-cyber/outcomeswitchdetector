@@ -64,8 +64,9 @@ def parse_api_response(raw):
     # Identification
     nct_id = _safe_get(protocol, "identificationModule", "nctId", default="UNKNOWN")
 
-    # Status
+    # Status and dated registration metadata (never infer era from NCT number).
     status = _safe_get(protocol, "statusModule", "overallStatus", default="UNKNOWN")
+    first_submitted = _safe_get(protocol, "statusModule", "studyFirstSubmitDate", default="")
 
     # Phase
     phases = _safe_get(protocol, "designModule", "phases", default=[])
@@ -101,6 +102,7 @@ def parse_api_response(raw):
     return {
         "nctId": nct_id,
         "status": status,
+        "studyFirstSubmitDate": first_submitted,
         "phase": phase,
         "sponsor": sponsor,
         "sponsorClass": sponsor_class,
@@ -132,16 +134,23 @@ def fetch_completed_with_results(max_pages=1, page_size=20):
     """
     import requests
 
+    if not isinstance(max_pages, int) or max_pages < 1:
+        raise ValueError("max_pages must be >= 1")
+    if not isinstance(page_size, int) or not 1 <= page_size <= 1000:
+        raise ValueError("page_size must be between 1 and 1000")
+
     base_url = "https://clinicaltrials.gov/api/v2/studies"
     params = {
         "filter.overallStatus": "COMPLETED",
-        "filter.resultsReported": "true",
+        "aggFilters": "results:with",  # Official v2 results filter (not filter.resultsReported)
         "pageSize": page_size,
         "format": "json"
     }
 
     trials = []
     page_token = None
+    seen_tokens = set()
+    seen_ids = set()
 
     for _ in range(max_pages):
         if page_token:
@@ -151,11 +160,27 @@ def fetch_completed_with_results(max_pages=1, page_size=20):
         resp.raise_for_status()
         data = resp.json()
 
-        for study in data.get("studies", []):
-            trials.append(parse_api_response(study))
+        studies = data.get("studies")
+        if not isinstance(studies, list):
+            raise ValueError("ClinicalTrials.gov response missing studies list")
+        for study in studies:
+            trial = parse_api_response(study)
+            if trial["status"] != "COMPLETED" or not trial["hasResults"]:
+                raise ValueError("API returned a study outside completed-with-results filter")
+            nct_id = trial["nctId"]
+            if not re.fullmatch(r"NCT\d{8}", nct_id):
+                raise ValueError("API returned a missing or invalid NCT identifier")
+            if nct_id in seen_ids:
+                raise ValueError("Duplicate NCT identifier across API pages: " + nct_id)
+            seen_ids.add(nct_id)
+            trials.append(trial)
 
-        page_token = data.get("nextPageToken")
+        new_token = data.get("nextPageToken")
+        if new_token and (new_token in seen_tokens or new_token == page_token):
+            raise ValueError("Repeated ClinicalTrials.gov pagination token")
+        page_token = new_token
         if not page_token:
             break
+        seen_tokens.add(page_token)
 
     return trials

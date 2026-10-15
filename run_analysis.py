@@ -41,8 +41,14 @@ def run_pipeline(input_path=None, output_path=None):
     # 2. Detect switches and score severity
     analyzed = []
     total_switches = 0
+    unassessable_trials = 0
     for trial in trials:
         if not trial["hasResults"]:
+            continue
+        # A study with posted results but no PRIMARY outcome measure is not
+        # evidence that each registered primary outcome was "removed".
+        if not trial["resultsPrimary"]:
+            unassessable_trials += 1
             continue
         switches = detect_switches(trial)
         switches = score_all(switches)
@@ -62,6 +68,9 @@ def run_pipeline(input_path=None, output_path=None):
             "total_trials": len(analyzed),
             "trials_with_switches": sum(1 for a in analyzed if a["switches"]),
             "total_switches": total_switches,
+            "unassessable_trials_no_primary_results": unassessable_trials,
+            "evidence_status": "UNVERIFIED_CURRENT_RECORD_DISCORDANCE",
+            "interpretation": "Current registered outcomes vs posted results only; archived trial versions needed to establish historical switching",
             "switch_rate": sum(1 for a in analyzed if a["switches"]) / len(analyzed) if analyzed else 0.0,
         },
         "by_sponsor": by_sponsor,
