@@ -3,27 +3,24 @@
 import re
 from collections import defaultdict
 
-# FDAAA 2007 cutoff — trials after this date must report results
+# Descriptive date boundary only. NOT a determination of FDAAA applicability.
 FDAAA_CUTOFF_YEAR = 2007
 
 
-def _get_nct_year(nct_id):
-    """Estimate enrollment era from NCT ID numeric portion.
+def _get_nct_year(trial):
+    """Descriptive submission cohort based on actual CT.gov date, never NCT ID.
 
-    NCT IDs are assigned sequentially, so higher numbers = later trials.
-    For our analysis, we use a simple heuristic:
-    NCT00000001-NCT00500000 ~ pre-2007
-    NCT00500001+ ~ post-FDAAA
-
-    In production, use actual startDate from the protocol.
+    Registration around 2007 alone never establishes FDAAA 801 obligations.
+    Missing or malformed dates remain unknown, rather than being guessed.
     """
-    match = re.search(r'NCT(\d+)', nct_id)
-    if not match:
-        return "unknown"
-    num = int(match.group(1))
-    if num <= 500000:
-        return "pre-FDAAA"
-    return "post-FDAAA"
+    from datetime import date
+
+    raw = trial.get("studyFirstSubmitDate", "")
+    try:
+        registered = date.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return "unknown_submission_date"
+    return "submitted_before_2007" if registered.year < 2007 else "submitted_2007_or_later"
 
 
 def aggregate_by_sponsor(analyzed_trials):
@@ -110,7 +107,7 @@ def aggregate_by_condition(analyzed_trials):
 
 
 def aggregate_by_era(analyzed_trials):
-    """Roll up switch counts by era (pre/post FDAAA 2007).
+    """Roll up *candidate discrepancies* by actual pre/2007+ submission date.
 
     Parameters
     ----------
@@ -129,7 +126,7 @@ def aggregate_by_era(analyzed_trials):
     for item in analyzed_trials:
         trial = item["trial"]
         switches = item["switches"]
-        era = _get_nct_year(trial.get("nctId", ""))
+        era = _get_nct_year(trial)
 
         rollup[era]["total_trials"] += 1
         if switches:
