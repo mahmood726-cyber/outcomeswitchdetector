@@ -19,15 +19,18 @@ def _extract_timeframes(outcomes):
     return [o.get("timeFrame", "") for o in outcomes]
 
 
-def _find_best_match(target, candidates):
+def _find_best_match(target, candidates, excluded=None):
     """Find the best matching candidate for target.
 
     Returns (index, similarity) or (-1, 0.0) if no match.
     """
+    excluded = excluded or set()
     best_idx = -1
     best_sim = 0.0
 
     for i, candidate in enumerate(candidates):
+        if i in excluded:
+            continue
         sim = compute_similarity(target, candidate)
         if sim > best_sim:
             best_sim = sim
@@ -125,7 +128,7 @@ def detect_switches(trial):
     # 1. Check each protocol primary against results
     for i, pp in enumerate(proto_primary):
         # Check if it's in results primary
-        idx_rp, sim_rp = _find_best_match(pp, results_primary)
+        idx_rp, sim_rp = _find_best_match(pp, results_primary, matched_results_primary)
 
         if sim_rp >= SAME_THRESHOLD and idx_rp not in matched_results_primary:
             matched_results_primary.add(idx_rp)
@@ -140,7 +143,7 @@ def detect_switches(trial):
             continue
 
         # Check if it was demoted to secondary
-        idx_rs, sim_rs = _find_best_match(pp, results_secondary)
+        idx_rs, sim_rs = _find_best_match(pp, results_secondary, matched_results_secondary)
         if sim_rs >= SAME_THRESHOLD and idx_rs not in matched_results_secondary:
             matched_results_secondary.add(idx_rs)
             switches.append({
@@ -178,7 +181,7 @@ def detect_switches(trial):
     # 2. Check each protocol secondary against results
     for j, ps in enumerate(proto_secondary):
         # Check if it was promoted to primary
-        idx_rp, sim_rp = _find_best_match(ps, results_primary)
+        idx_rp, sim_rp = _find_best_match(ps, results_primary, matched_results_primary)
         if sim_rp >= SAME_THRESHOLD and idx_rp not in matched_results_primary:
             matched_results_primary.add(idx_rp)
             switches.append({
@@ -189,7 +192,7 @@ def detect_switches(trial):
             continue
 
         # Check if it's in results secondary (normal)
-        idx_rs, sim_rs = _find_best_match(ps, results_secondary)
+        idx_rs, sim_rs = _find_best_match(ps, results_secondary, matched_results_secondary)
         if sim_rs >= SAME_THRESHOLD and idx_rs not in matched_results_secondary:
             matched_results_secondary.add(idx_rs)
             continue
@@ -205,4 +208,11 @@ def detect_switches(trial):
                 "detail": f"Primary endpoint '{rp}' in results but not in protocol"
             })
 
+    # Cross-sectional posted results vs the CURRENT registry protocol are
+    # candidate discrepancies, NOT verified changes from the original trial
+    # registration. Archived versions and independent adjudication are needed.
+    for finding in switches:
+        finding["verification_status"] = "UNVERIFIED_CURRENT_RECORD_DISCORDANCE"
+        finding["requires_archived_protocol_history"] = True
+        finding["comparison_basis"] = "current_protocol_vs_posted_results"
     return switches
